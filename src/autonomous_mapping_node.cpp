@@ -163,6 +163,54 @@ LocationHistory _360_locations;
 
 
 
+class periodicLocationsHistory{
+
+	public:
+		vector<pair<double,double>> locations;
+		int max_size = 0;
+		double last_location_time = 0;
+		double time_between_locations = 0;
+
+
+	void add_location(double x, double y){
+		locations.insert(locations.begin(), make_pair(x,y));
+		while (locations.size() > max_size){
+			locations.pop_back();
+		}
+	}
+
+	// return true if for the past locations we were at the same place -> probably stuck
+	bool checkSameLocation(double curr_x, double curr_y, double dist_threshold){
+
+		for(int i=0; i<locations.size(); i++){
+
+			if (squaredNorm(locations[i].first, locations[i].second, curr_x, curr_y) > dist_threshold){
+				return false;
+			}
+
+		}
+
+		return true;
+	}
+
+	void printLocations(){
+
+		for(int i=0; i<locations.size(); i++){
+
+			cout << "X " << locations[i].first << " " << "Y " << locations[i].second << endl;
+
+		}
+
+
+	}
+
+};
+
+periodicLocationsHistory recent_history;
+
+
+
+
 int randomSign(){
 	return 2*(rand()%2)-1;
 }
@@ -209,7 +257,6 @@ void laserCallback(const sensor_msgs::LaserScan::ConstPtr& msg){
  
 void mapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg){
 	map_data = msg->data;
-	//cout << (map_data[480]==-1) << endl;
 	resolution = msg->info.resolution;
 	width = msg->info.width;
 	height = msg->info.height;
@@ -259,13 +306,7 @@ void armMapGrid(){
 			
 		// check within map array bounds
 		if((leftX < width && leftX > 0) && (leftY < height && leftY > 0)){
-			//cout<<"width leftX  height leftY" << width<<" "<<leftX <<" "<<height<<" "<<leftY<<endl;
-/*			if(map_data[leftX + width*leftY] != -1){
-				cout<<"not -1"<<endl;
-			}
-			else{
-				cout<<"is -1"<<endl;
-			}*/
+
 			leftarm_map[i] = map_data[leftX + width*leftY];
 		}
 
@@ -326,7 +367,7 @@ double turnState[angleSectors];
 // below wallThreshold is critical, move away
 // beyond exploreThreshold means that that side is pretty open, take on an exploratory behaviour
 
-command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates bump, int leftArm, int rightArm){
+command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates bump, int leftArm, int rightArm, bool stuck_flag){
 
 
 	command plannedCommand = command(0,0,0,false,0);
@@ -403,8 +444,14 @@ command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates
 		//go straight for a bit after turning away from the wall
 		// cannot be overwritten by laser avoidance command
 		// to avoid condition of getting stuck turning in a corner
-		return command(0,0.1,0.2,false,2);
-		goto endPlanning;
+		if (stuck_flag){
+			return command(0,0.1,0.2,false,2);
+			goto endPlanning;
+		}
+		else{
+			return command(0,0.1,0.2,false,0);
+			goto endPlanning;
+		}
 	}
 
 
@@ -510,7 +557,7 @@ command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates
 
 
 
-void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, double timeNow, double timeBetweenSpins, double& timeLastSpin, bool& leftExplore, bool& rightExplore, double& exploreTimer, double exploreInterval, bool _360_on){
+void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, double timeNow, double timeBetweenSpins, double& timeLastSpin, bool& leftExplore, bool& rightExplore, double& exploreTimer, double exploreInterval, bool _360_on, bool stuck_flag){
 
 		
 	double spinSpeed = 1*max_ang_speed;
@@ -525,9 +572,9 @@ void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, doub
 
 			currentCommand = newAvoidanceCommand;
 			exploreTimer = ros::Time::now().toSec();  //avoidance commands reset the exploration 
-			printf("Doing new avoidance command - start time: %f - turn avoid? %i \n",currentCommand.start_time,currentCommand.turn_avoid);
-			printf("angular: %f   linear: %f \n",currentCommand.angularSpeed, currentCommand.linearSpeed);
-			printf("command type: %i \n \n", currentCommand.type);
+			cout << "Doing new avoidance command - start time: " << currentCommand.start_time << " - turn avoid? " << currentCommand.turn_avoid << endl;;
+			cout << "angular: " << currentCommand.angularSpeed << " - linear: " << currentCommand.linearSpeed <<endl;;
+			cout << "command type: " << currentCommand.type << endl << endl;
 
 			goto endHighLevelPlanning;
 
@@ -538,7 +585,7 @@ void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, doub
 	else if(newAvoidanceCommand.type == 3 && currentCommand.type == 1){
 		currentCommand = newAvoidanceCommand;
 		exploreTimer = ros::Time::now().toSec();
-		printf("Hit bumper during spin, performing bumper avoidance manuever \n \n");
+		cout << "Hit bumper during spin, performing bumper avoidance manuever" << endl << endl;
 
 		goto endHighLevelPlanning;
 	}
@@ -606,7 +653,7 @@ void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, doub
     	}
     	else{
 	    	currentCommand = command(spinSpeed, 0 , 2*pi/spinSpeed, false, 1);
-	    	cout<<"You spin me right round, baby right round, like a record baby, right round right round"<<endl;
+	    	cout<<"You spin me right round, baby right round, like a record baby, right round right round"<<endl<<endl;
 
 	    	timeLastSpin = ros::Time::now().toSec() + 2*pi/spinSpeed;
 	    	_360_locations.add_location(bot_x, bot_y);
@@ -623,7 +670,7 @@ void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, doub
     if(timeNow - currentCommand.start_time > currentCommand.duration){
 
 		//if both left and right explore conditions, pick one at random
-		if (leftExplore && rightExplore){
+		if (leftExplore && rightExplore && !_360_on && !stuck_flag){
 			currentCommand = command(randomSign()*spinSpeed, 0, exploreTurnAmount/spinSpeed, false, 4);
 			leftExplore = false;
 			rightExplore = false;
@@ -632,7 +679,7 @@ void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, doub
 			goto endHighLevelPlanning;
 		}
 
-		if(leftExplore && !rightExplore){
+		if(leftExplore && !rightExplore && !_360_on && !stuck_flag){
 			currentCommand = command(spinSpeed, 0, exploreTurnAmount/spinSpeed, false, 4);
 			leftExplore = false;
 			exploreTimer = ros::Time::now().toSec();
@@ -641,7 +688,7 @@ void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, doub
 
 		}
 
-		if(!leftExplore && rightExplore){
+		if(!leftExplore && rightExplore && !_360_on && !stuck_flag){
 			currentCommand = command(-spinSpeed, 0, exploreTurnAmount/spinSpeed, false, 4);
 			rightExplore = false;
 			exploreTimer = ros::Time::now().toSec();
@@ -657,16 +704,11 @@ void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, doub
 	}
 
 
-
     endHighLevelPlanning:
     
     ; //null statement to close the function after the label
 
 }
-
-
-
-
 
 
 
@@ -698,8 +740,6 @@ int main(int argc, char **argv)
 
 	// map occupany grid subscriber
 	ros::Subscriber occupany_map = nh.subscribe("map", 1, &mapCallback);
-
-
 
 
 
@@ -756,17 +796,43 @@ int main(int argc, char **argv)
 	bool enable360 = false;
 
 
+	recent_history.max_size = 2;
+	recent_history.time_between_locations = 3;
+	recent_history.last_location_time = ros::Time::now().toSec();
+	bool possible_stuck_flag = false;
+
 
 	std::chrono::time_point<std::chrono::system_clock> start;
 	start = std::chrono::system_clock::now();
 	uint64_t secondsElapsed = 0;
 
+	double timeNow;
 
 	while(ros::ok() && secondsElapsed <= 480){
 
 		ros::spinOnce();
 
 		eStop.block();
+
+		timeNow = ros::Time::now().toSec();
+
+		if (timeNow - recent_history.last_location_time > recent_history.time_between_locations){
+
+			recent_history.add_location(bot_x,bot_y);
+			recent_history.last_location_time = timeNow;
+
+			//recent_history.printLocations();
+
+		}
+
+
+		if (recent_history.checkSameLocation(bot_x,bot_y,0.01)){
+			possible_stuck_flag = true;
+		}
+		else{
+			possible_stuck_flag = false;
+		}
+
 
 
 		if(enable360 == false && secondsElapsed > enable360_time){
@@ -784,15 +850,16 @@ int main(int argc, char **argv)
 		int temp_right = checkRightArm();
 
 
+		
 		// on rising edge, start timing and see if in some time that side is still unknown, to indentify significant unknown region
 		if (left_flag != 1 && temp_left == 1){
-			left_arm_timer = ros::Time::now().toSec();
+			left_arm_timer = timeNow;
 			left_lookout_flag = true;
 
 		}
 
 		if (right_flag != 1 && temp_right == 1){
-			right_arm_timer = ros::Time::now().toSec();
+			right_arm_timer = timeNow;
 			right_lookout_flag = true;
 		}
 
@@ -800,30 +867,29 @@ int main(int argc, char **argv)
 		right_flag = checkRightArm();
 
 
-		if (ros::Time::now().toSec() - left_arm_timer > 1.18 && left_flag == 1 && left_lookout_flag == 1 && ros::Time::now().toSec() - overall_exploration_timer > time_between_explorations){
+		if (timeNow - left_arm_timer > 1.18 && left_flag == 1 && left_lookout_flag == 1 && timeNow - overall_exploration_timer > time_between_explorations){
 			left_lookout_flag = false;
 
 			left_explore_flag = true;
 		}
 
 
-		if (ros::Time::now().toSec() - right_arm_timer > 1.18 && right_flag == 1 && right_lookout_flag == 1 && ros::Time::now().toSec() - overall_exploration_timer > time_between_explorations){
+		if (timeNow - right_arm_timer > 1.18 && right_flag == 1 && right_lookout_flag == 1 && timeNow - overall_exploration_timer > time_between_explorations){
 			right_lookout_flag = false;
 
 			right_explore_flag = true;
 		}
-
+		
 
 		// threshold parameter for the avoidance planner
 		double wallThresh = 0.4;
 
 
-		command avoidanceCommand = avoidancePlanner(wallThresh, currCommand, bumper, left_flag, right_flag);
+		command avoidanceCommand = avoidancePlanner(wallThresh, currCommand, bumper, left_flag, right_flag, possible_stuck_flag);
 
-		highLevelPlanner(avoidanceCommand, currCommand, ros::Time::now().toSec(), betweenSpin, lastSpin, left_explore_flag, right_explore_flag, overall_exploration_timer, time_between_explorations, enable360);
+		highLevelPlanner(avoidanceCommand, currCommand, timeNow, betweenSpin, lastSpin, left_explore_flag, right_explore_flag, overall_exploration_timer, time_between_explorations, enable360, possible_stuck_flag);
 
 		
-
 
   		vel.angular.z = currCommand.angularSpeed;
   		vel.linear.x = currCommand.linearSpeed;
