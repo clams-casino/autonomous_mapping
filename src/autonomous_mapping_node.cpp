@@ -76,8 +76,6 @@ class command{
 		double start_time;
 		bool turn_avoid; //true if the last command was a turn to get away from a wall
 		int type; //basically a flag for if the request command is critical for avoidance
-	
-
 
 	command(double ang, double lin, double dur, bool avoid, int command_type){
 		this->duration = dur;
@@ -86,8 +84,7 @@ class command{
 		this->start_time = ros::Time::now().toSec();
 		this->turn_avoid = avoid;
 		this->type = command_type;
-	}
-	
+	}	
 };
 
 
@@ -128,7 +125,6 @@ class LocationHistory{
 		int size = 0;
 		vector<pair<double,double>> prev_locations;
 
-
 	void add_location(double x, double y){
 		prev_locations.push_back(make_pair(x,y));
 		size = size + 1;
@@ -155,7 +151,6 @@ class periodicLocationsHistory{
 		int max_size = 0;
 		double last_location_time = 0;
 		double time_between_locations = 0;
-
 
 	void add_location(double x, double y){
 		locations.insert(locations.begin(), make_pair(x,y));
@@ -191,7 +186,6 @@ int randomSign(){
 	return 2*(rand()%2)-1;
 }
 
-
 int sign(double a){
 	return a / abs(a);
 }
@@ -205,8 +199,6 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr& msg){
 
 
 void laserCallback(const sensor_msgs::LaserScan::ConstPtr& msg){
-	//fill with your 
-
 
 	// return the average laser range in each sector 
 	for(int i=0; i<angleSectors; i++){
@@ -269,7 +261,6 @@ void armMapGrid(){
 		if((rightX < width && rightX > 0) && (rightY < height && rightY > 0)){
 			rightarm_map[i] = map_data[rightX + width*rightY];
 		}
-
 	}
 }
 
@@ -309,7 +300,6 @@ int checkRightArm(){
 // avoidance plan based on depth scan sector ranges
 command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates bump, int leftArm, int rightArm, bool stuck_flag){
 
-
 	command plannedCommand = command(0,0,0,false,0);
 
 	// stats about the sectors
@@ -319,7 +309,6 @@ command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates
 
 	double turnState[angleSectors];
 	double turnNumber = 0;
-
 
 	for(int i=0; i<angleSectors; i++){
 		if(sectorRange[i]<wallThreshold){
@@ -339,8 +328,7 @@ command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates
 
 	avgRange = avgRange / angleSectors;
  
-
-
+	
 	//check bumper first since its the most critical
 	if(bump.isBumped()){
 
@@ -391,13 +379,11 @@ command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates
 	// was not a turn avoid command
 	if(max_range < wallThreshold &&  prevCommand.turn_avoid == false){
 
-
 		// if both arms say wall, then we're probably in a corner and should do a 180
 		if(leftArm == -1 && rightArm == -1){
 			plannedCommand = command(max_ang_speed, 0, pi/max_ang_speed, true, 2);
 			goto endPlanning;
 		}
-
 
 		// if left arm says unknown, but not right
 		if(leftArm == 1 && rightArm != 1){
@@ -427,12 +413,10 @@ command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates
 				goto endPlanning;
 			}
 		}
-
 	} 
 
 	//if right corner is near wall, but left corner not near wall
 	if(sectorRange[0] < wallThreshold && sectorRange[4] > wallThreshold  &&  prevCommand.turn_avoid == false){
-
 		
 		if(sectorRange[1] < wallThreshold){
 			// if right also near wall, then left turn by more, say ~45 degrees
@@ -462,7 +446,6 @@ command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates
 		}
 	}
 
-
 	for(int i=0; i<angleSectors; i++){ turnNumber = turnNumber + turnState[i]*sectorWeights[i]; }
 	turnNumber = -1*turnNumber / angleSectors; //switch sign of turnNumber around
 	if(turnNumber > 5){ turnNumber = 5; }
@@ -478,12 +461,10 @@ command avoidancePlanner(double wallThreshold, command prevCommand, bumperStates
 
 
 void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, double timeNow, double timeBetweenSpins, double& timeLastSpin, bool& leftExplore, bool& rightExplore, double& exploreTimer, double exploreInterval, bool _360_on, bool stuck_flag){
-
 		
 	double spinSpeed = 1*max_ang_speed;
 	double rangeExploreThreshold = 1.5; 
 	double exploreTurnAmount = pi/2;
-
 
 	// if the avoidance says we're in danger, do what we always do
 	// but if we're already doing a 360 then just go ahead, unless we get a bumper avoidance
@@ -509,7 +490,6 @@ void highLevelPlanner(command newAvoidanceCommand, command& currentCommand, doub
 		goto endHighLevelPlanning;
 	}
     
-
 	// since we're past the avoidance conditions check the explore conditions
 
 	// what to do if the previous command expires and it was a exploration command
@@ -626,21 +606,24 @@ int main(int argc, char **argv)
 	ros::NodeHandle nh;
 	teleController eStop;
 
+	// subcribers
 	ros::Subscriber laser_sub = nh.subscribe("scan", 10, &laserCallback);
-
-	bumperStates bumper;
-	bumper.left = false; bumper.center = false; bumper.right = false;
 	ros::Subscriber bumper_sub = nh.subscribe("mobile_base/events/bumper", 10, &bumperStates::bumperCallback, &bumper);
-
 	ros::Subscriber odom = nh.subscribe("/odom", 10, &odomCallback);
-
 	ros::Subscriber occupany_map = nh.subscribe("map", 1, &mapCallback);
 
+	// publishers
 	ros::Publisher vel_pub = nh.advertise<geometry_msgs::Twist>("cmd_vel_mux/input/teleop", 1);
+	
+	// velocity publisher variables
 	angular = 0.0;
 	linear = 0.0;
 	geometry_msgs::Twist vel;
 
+	// bumper variables
+	bumperStates bumper;
+	bumper.left = false; bumper.center = false; bumper.right = false;
+	
 	// getting indices of scan sectors
 	for(int s=0; s < angleSectors; s++){
 		sectorIndicies[s] = del_sector * s;
@@ -656,10 +639,8 @@ int main(int argc, char **argv)
 		leftarm_bot[i].first = sin(ARMANGLE)*(i+1)*ARMRESOLUTION;
 		leftarm_bot[i].second = cos(ARMANGLE)*(i+1)*ARMRESOLUTION;
 
-
 		rightarm_bot[i].first = sin(ARMANGLE)*(i+1)*ARMRESOLUTION;
 		rightarm_bot[i].second = -cos(ARMANGLE)*(i+1)*ARMRESOLUTION;
-	
 	}
 
 	int left_flag, right_flag;
@@ -695,7 +676,6 @@ int main(int argc, char **argv)
 	while(ros::ok() && secondsElapsed <= 480){
 
 		ros::spinOnce();
-
 		eStop.block();
 
 		timeNow = ros::Time::now().toSec();
@@ -723,12 +703,10 @@ int main(int argc, char **argv)
 		int temp_left = checkLeftArm();
 		int temp_right = checkRightArm();
 
-
 		// on rising edge, start timing and see if in some time that side is still unknown, to indentify significant unknown region
 		if (left_flag != 1 && temp_left == 1){
 			left_arm_timer = timeNow;
 			left_lookout_flag = true;
-
 		}
 
 		if (right_flag != 1 && temp_right == 1){
@@ -766,7 +744,6 @@ int main(int argc, char **argv)
 
 	cout<<"Bye Felicia"<<endl<<endl;
 
-
 	//automatically save the map
 	cout<<"Saving map"<<endl;
 
@@ -778,7 +755,6 @@ int main(int argc, char **argv)
 	string day = to_string(ltm->tm_mday);
 	string hour = to_string(ltm->tm_hour);
 	string minute = to_string(ltm->tm_min);
-
 
 	string directory_name = "~/ros_maps/" + year + "_" + month + "_" + day + "_" + hour + "_" + minute;
 	string make_folder = "mkdir " + directory_name;
