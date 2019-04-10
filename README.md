@@ -1,4 +1,4 @@
 # autonomous_mapping
-turtlebot autonomous mapping of a simple maze
+ROS node for a turtlebot to autonomous map a enclosed environment
 
 Place into a ROS package folder and build within the catkin workspace
